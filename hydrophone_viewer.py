@@ -1,5 +1,5 @@
 # === Hydrophone Viewer (Restored Version with All Features) ===
-# Version 1.5.0
+# Version 1.5.1
 import os
 import numpy as np
 import matplotlib.pyplot as plt
