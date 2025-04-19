@@ -10,6 +10,14 @@ from matplotlib.widgets import Button, SpanSelector, RangeSlider
 import tkinter as tk
 from tkinter import filedialog
 from matplotlib.transforms import blended_transform_factory
+import logging
+
+# Configure logging
+logging.basicConfig(
+    filename='error_log.txt',
+    level=logging.ERROR,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 spec_img = None
 ax_fft = None
@@ -35,26 +43,31 @@ comment_buttons = []
 from datetime import datetime, timedelta
 
 def parse_hydrophone_file(file_path):
-    with open(file_path, 'r') as f:
-        lines = f.readlines()
-    start_idx = next(i for i, line in enumerate(lines) if line.startswith("Time") and "Data Points" in line)
-    header_tokens = lines[start_idx].strip().split()
-    freqs = [float(tok) for tok in header_tokens if tok.replace('.', '', 1).isdigit()]
-    time_labels = []
-    spec = []
-    time_objects = []
-    for line in lines[start_idx + 1:]:
-        parts = line.strip().split()
-        if len(parts) < 6:
-            continue
-        time_labels.append(parts[0])
-        time_objects.append(datetime.strptime(parts[0], "%H:%M:%S"))
-        amplitudes = [float(val) for val in parts[5:5+len(freqs)]]
-        spec.append(amplitudes)
-    spec_array = np.array(spec)
-    if spec_array.shape[1] != len(freqs):
-        raise ValueError("Mismatch in frequency bin count")
-    return time_labels, freqs, spec_array, time_objects
+    try:
+        with open(file_path, 'r') as f:
+            lines = f.readlines()
+        start_idx = next(i for i, line in enumerate(lines) if line.startswith("Time") and "Data Points" in line)
+        header_tokens = lines[start_idx].strip().split()
+        freqs = [float(tok) for tok in header_tokens if tok.replace('.', '', 1).isdigit()]
+        time_labels = []
+        spec = []
+        time_objects = []
+        for line in lines[start_idx + 1:]:
+            parts = line.strip().split()
+            if len(parts) < 6:
+                continue
+            time_labels.append(parts[0])
+            time_objects.append(datetime.strptime(parts[0], "%H:%M:%S"))
+            amplitudes = [float(val) for val in parts[5:5+len(freqs)]]
+            spec.append(amplitudes)
+        spec_array = np.array(spec)
+        if spec_array.shape[1] != len(freqs):
+            raise ValueError("Mismatch in frequency bin count")
+        return time_labels, freqs, spec_array, time_objects
+    except Exception as e:
+        logging.error(f"Error parsing file {file_path}", exc_info=True)
+        print(f"Error parsing file {file_path}. Check error_log.txt for details.")
+        raise
 
 
 def update_fft(idx, freqs, data):
@@ -172,23 +185,27 @@ def setup_viewer(file_paths):
 
     last_time = None
     for path in file_paths:
-        t, f, d, t_objs = parse_hydrophone_file(path)
-        if last_time and (t_objs[0] - last_time).total_seconds() > 1.5:
-            gap_len = int((t_objs[0] - last_time).total_seconds())
-            if gap_len > 1:
-                gap_array = np.full((gap_len, d.shape[1]), np.nan)
-                data_list.append(gap_array)
-                time_labels_all.extend(["GAP"] * gap_len)
-                idx_offset += gap_len
-        last_time = t_objs[-1]
-        time_labels_all.extend(t)
-        data_list.append(d)
-        file_ranges.append((idx_offset, idx_offset + len(d) - 1))
-        idx_offset += len(d)
-        if freqs_global is None:
-            freqs_global = f
-        elif freqs_global != f:
-            raise ValueError("Frequency bins don't match")
+        try:
+            t, f, d, t_objs = parse_hydrophone_file(path)
+            if last_time and (t_objs[0] - last_time).total_seconds() > 1.5:
+                gap_len = int((t_objs[0] - last_time).total_seconds())
+                if gap_len > 1:
+                    gap_array = np.full((gap_len, d.shape[1]), np.nan)
+                    data_list.append(gap_array)
+                    time_labels_all.extend(["GAP"] * gap_len)
+                    idx_offset += gap_len
+            last_time = t_objs[-1]
+            time_labels_all.extend(t)
+            data_list.append(d)
+            file_ranges.append((idx_offset, idx_offset + len(d) - 1))
+            idx_offset += len(d)
+            if freqs_global is None:
+                freqs_global = f
+            elif freqs_global != f:
+                raise ValueError("Frequency bins don't match")
+        except Exception as e:
+            logging.error(f"Error processing file {path}", exc_info=True)
+            print(f"Error processing file {path}. Check error_log.txt for details.")
 
     data_global = np.vstack(data_list)
     comments.clear()
@@ -540,14 +557,46 @@ def setup_viewer(file_paths):
         plt.draw()
 
     update_comment_panel()
+
+    # Add export options for spectrogram and FFT plots
+    def export_spectrogram(event):
+        try:
+            save_path = filedialog.asksaveasfilename(defaultextension=".png", filetypes=[("PNG Image", "*.png")])
+            if save_path:
+                fig.savefig(save_path)
+                print(f"Spectrogram saved to {save_path}")
+        except Exception as e:
+            logging.error("Error exporting spectrogram", exc_info=True)
+            print("Error exporting spectrogram. Check error_log.txt for details.")
+
+    def export_fft_data(event):
+        try:
+            save_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV File", "*.csv")])
+            if save_path:
+                np.savetxt(save_path, data_global, delimiter=",", header="Frequency,Amplitude", comments="")
+                print(f"FFT data saved to {save_path}")
+        except Exception as e:
+            logging.error("Error exporting FFT data", exc_info=True)
+            print("Error exporting FFT data. Check error_log.txt for details.")
+
+    # Add buttons for export options
+    ax_export_spec = fig.add_axes([0.1, 0.08, 0.1, 0.04])
+    btn_export_spec = Button(ax_export_spec, 'Export Spec')
+    btn_export_spec.on_clicked(export_spectrogram)
+
+    ax_export_fft = fig.add_axes([0.25, 0.08, 0.1, 0.04])
+    btn_export_fft = Button(ax_export_fft, 'Export FFT')
+    btn_export_fft.on_clicked(export_fft_data)
+
     plt.show()
 
 
 if __name__ == '__main__':
     root = tk.Tk(); root.withdraw()
     try:
-        files = filedialog.askopenfilenames(filetypes=[('Text', '*.txt')])
-        if files:
-            setup_viewer(files)
+        file_paths = filedialog.askopenfilenames(filetypes=[('Text', '*.txt')])
+        if file_paths:
+            setup_viewer(file_paths)
     except Exception as e:
-        print("An error occurred while launching the viewer:", e)
+        logging.error("An error occurred while launching the viewer", exc_info=True)
+        print("An error occurred. Please check the error_log.txt file for details.")
