@@ -73,7 +73,7 @@ def parse_hydrophone_file(file_path):
 def update_fft(idx, freqs, data):
     ax_fft.clear()
     ax_fft.set_facecolor('black')
-    ax_fft.set_title('FFT Slice')
+    ax_fft.set_title('FFT Slice', fontsize=12, color='#ffffff')
     ax_fft.grid(True, axis='y', linestyle='--', color='gray', alpha=0.3)
     ax_fft.set_ylim(fft_ymin, fft_ymax)
     ax_fft.plot(freqs, data[idx], color='lime')
@@ -101,7 +101,7 @@ def update_fft_range(start, end, freqs, data):
     global fft_ymin, fft_ymax
     ax_fft.clear()
     ax_fft.set_facecolor('black')
-    ax_fft.set_title(f'Stacked FFTs {start}–{end}')
+    ax_fft.set_title(f'Stacked FFTs {start}–{end}', fontsize=12, color='#ffffff')
     ax_fft.grid(True, axis='y', linestyle='--', color='gray', alpha=0.3)
     ax_fft.set_ylim(fft_ymin, fft_ymax)
     for i in range(start, end+1):
@@ -523,9 +523,19 @@ def setup_viewer(file_paths):
         comment = tkinter.simpledialog.askstring("Add Comment", "Enter your comment for the selected region:")
         if comment:
             start, end = selected_range
+            gain = spec_img.get_clim()
+            y_scale = (fft_ymin, fft_ymax)
+            freq_marker_values = [marker[3] for marker in freq_markers if marker[3] is not None]
+            comments.append({
+                "start": start,
+                "end": end,
+                "text": comment,
+                "gain": gain,
+                "y_scale": y_scale,
+                "freq_markers": freq_marker_values
+            })
             print(f"Comment saved for range {start}–{end}: {comment}")
             add_log_entry(f"Comment added: '{comment}' for range {start}–{end}")
-            comments.append({"start": start, "end": end, "text": comment})
             update_comment_panel()
 
     ax_comment = fig.add_axes([0.5, 0.13, 0.1, 0.04])
@@ -537,24 +547,75 @@ def setup_viewer(file_paths):
     ax_comments.set_title("Comments", fontsize=9, pad=8)
     ax_comments.axis("off")
 
+    from matplotlib.widgets import Slider
+
+    # Update comment panel to use a scrollable box with compact buttons
     def update_comment_panel():
-        for btn in comment_buttons:
-            try: btn.ax.remove()
-            except: pass
-        comment_buttons.clear()
-        for i, c in enumerate(comments):
-            y = 0.9 - i * 0.08
-            ax = fig.add_axes([0.83, 0.23 - i * 0.06, 0.12, 0.05])
-            b = Button(ax, f"{c['start']}-{c['end']}")
-            def jump(evt, s=c['start'], e=c['end']):
-                global fft_patch
-                if fft_patch:
-                    fft_patch.remove()
-                fft_patch = ax_spec.axvspan(s, e, color='orange', alpha=0.3)
-                update_fft_range(s, e, freqs_global, data_global)
-            b.on_clicked(jump)
-            comment_buttons.append(b)
-        plt.draw()
+        global ax_comments, comment_buttons
+        ax_comments.clear()
+        ax_comments.set_title("Comments", fontsize=9, pad=8)
+        ax_comments.axis("off")
+
+        # Define scrollable area
+        scroll_height = 0.05  # Height of each button
+        max_visible = 5  # Maximum number of visible buttons
+        total_height = len(comments) * scroll_height
+        scroll_position = 0  # Initial scroll position
+
+        # Add a slider for scrolling
+        if total_height > max_visible * scroll_height:
+            ax_scroll = fig.add_axes([0.96, 0.05, 0.02, 0.23], facecolor='lightgray')
+            slider = Slider(ax_scroll, '', 0, total_height - max_visible * scroll_height, valinit=0, orientation='vertical')
+
+            def on_scroll(val):
+                nonlocal scroll_position
+                scroll_position = val
+                render_comments()
+
+            slider.on_changed(on_scroll)
+
+        def render_comments():
+            for btn in comment_buttons:
+                try: btn.ax.remove()
+                except: pass
+            comment_buttons.clear()
+
+            start_idx = int(scroll_position // scroll_height)
+            end_idx = min(start_idx + max_visible, len(comments))
+
+            for i, c in enumerate(comments[start_idx:end_idx]):
+                y = 0.9 - (i * 0.18)
+                ax = fig.add_axes([0.83, 0.23 - i * 0.06, 0.12, 0.03])
+                b = Button(ax, f"Comment {start_idx + i + 1}")
+
+                def jump(evt, s=c['start'], e=c['end'], gain=c['gain'], y_scale=c['y_scale'], freq_markers=c['freq_markers']):
+                    global fft_patch
+                    if fft_patch:
+                        fft_patch.remove()
+                    fft_patch = ax_spec.axvspan(s, e, color='orange', alpha=0.3)
+                    update_fft_range(s, e, freqs_global, data_global)
+
+                    # Restore gain
+                    spec_img.set_clim(*gain)
+
+                    # Restore y-axis scale
+                    global fft_ymin, fft_ymax
+                    fft_ymin, fft_ymax = y_scale
+                    ax_fft.set_ylim(fft_ymin, fft_ymax)
+
+                    # Restore frequency markers
+                    for i, freq in enumerate(freq_markers):
+                        if i < len(freq_markers):
+                            update_marker(i, freq)
+
+                    plt.draw()
+
+                b.on_clicked(jump)
+                comment_buttons.append(b)
+
+            plt.draw()
+
+        render_comments()
 
     update_comment_panel()
 
@@ -587,6 +648,48 @@ def setup_viewer(file_paths):
     ax_export_fft = fig.add_axes([0.25, 0.08, 0.1, 0.04])
     btn_export_fft = Button(ax_export_fft, 'Export FFT')
     btn_export_fft.on_clicked(export_fft_data)
+
+    # Updated GUI layout and styling
+    fig.patch.set_facecolor('#f0f0f0')  # Set background color for the figure
+
+    # Update spectrogram axes styling
+    ax_spec.set_facecolor('#e6e6e6')
+    ax_spec.spines['top'].set_visible(False)
+    ax_spec.spines['right'].set_visible(False)
+    ax_spec.spines['left'].set_color('#666666')
+    ax_spec.spines['bottom'].set_color('#666666')
+    ax_spec.tick_params(axis='x', colors='#666666')
+    ax_spec.tick_params(axis='y', colors='#666666')
+    ax_spec.set_title('Spectrogram', fontsize=12, color='#333333')
+
+    # Update FFT axes styling
+    ax_fft.set_facecolor('black')
+    ax_fft.spines['top'].set_visible(False)
+    ax_fft.spines['right'].set_visible(False)
+    ax_fft.spines['left'].set_color('#666666')
+    ax_fft.spines['bottom'].set_color('#666666')
+    ax_fft.tick_params(axis='x', colors='#666666')
+    ax_fft.tick_params(axis='y', colors='#666666')
+    ax_fft.set_title('FFT Slice', fontsize=12, color='#ffffff')
+
+    # Update file list panel styling
+    ax_filelist.set_facecolor('#f9f9f9')
+    ax_filelist.set_title('Files', fontsize=10, pad=8, color='#333333')
+
+    # Update log panel styling
+    ax_log.set_facecolor('#f9f9f9')
+    ax_log.set_title('Log', fontsize=10, pad=4, color='#333333')
+
+    # Update button styling
+    for button in [btn_export_spec, btn_export_fft, btn_play, btn_clear, btn_comment, btn_up, btn_down]:
+        button.color = '#d9d9d9'
+        button.hovercolor = '#bfbfbf'
+
+    # Add a title to the entire figure
+    fig.suptitle('Hydrophone Data Viewer', fontsize=16, color='#333333', weight='bold')
+
+    # Adjust layout for better spacing
+    fig.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1, hspace=0.4, wspace=0.4)
 
     plt.show()
 
