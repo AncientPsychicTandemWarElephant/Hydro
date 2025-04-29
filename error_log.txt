@@ -1,0 +1,15 @@
+2025-04-20 08:08:45,907 - ERROR - An error occurred while launching the viewer
+Traceback (most recent call last):
+  File "c:\Users\ntrev\OneDrive\\u6587\u4ef6\Hydrophone Program\hydrophone_viewer.py", line 701, in <module>
+    setup_viewer(file_paths)
+    ~~~~~~~~~~~~^^^^^^^^^^^^
+  File "c:\Users\ntrev\OneDrive\\u6587\u4ef6\Hydrophone Program\hydrophone_viewer.py", line 619, in setup_viewer
+    update_comment_panel()
+    ~~~~~~~~~~~~~~~~~~~~^^
+  File "c:\Users\ntrev\OneDrive\\u6587\u4ef6\Hydrophone Program\hydrophone_viewer.py", line 617, in update_comment_panel
+    render_comments()
+    ~~~~~~~~~~~~~~~^^
+  File "c:\Users\ntrev\OneDrive\\u6587\u4ef6\Hydrophone Program\hydrophone_viewer.py", line 582, in render_comments
+    start_idx = int(scroll_position // scroll_height)
+                    ^^^^^^^^^^^^^^^
+NameError: name 'scroll_position' is not defined

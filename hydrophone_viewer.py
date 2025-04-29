@@ -39,6 +39,8 @@ comments = []
 log_entries = []
 comment_buttons = []
 
+# Ensure `scroll_position` is initialized globally
+scroll_position = 0  # Initial scroll position
 
 from datetime import datetime, timedelta
 
@@ -347,6 +349,7 @@ def setup_viewer(file_paths):
 
     fig.canvas.mpl_connect('button_press_event', on_click)
 
+    # Update the file list to highlight the selected file in yellow
     def on_pick(event):
         global file_patch
         if event.artist in file_texts:
@@ -358,6 +361,14 @@ def setup_viewer(file_paths):
             except ValueError:
                 file_patch = None
             file_patch = ax_spec.axvspan(start, end, color='blue', alpha=0.2)
+
+            # Highlight the selected file name in yellow
+            for i, txt in enumerate(file_texts):
+                if i == idx:
+                    txt.set_backgroundcolor('yellow')
+                else:
+                    txt.set_backgroundcolor(None)
+
             plt.draw()
 
     fig.canvas.mpl_connect('pick_event', on_pick)
@@ -441,60 +452,18 @@ def setup_viewer(file_paths):
 
     fig.canvas.mpl_connect('key_press_event', on_key)
 
+    # Update the clear_file_highlight function to also clear filename highlighting
     def clear_file_highlight(event):
         global file_patch
         if file_patch:
             file_patch.remove()
             file_patch = None
-            plt.draw()
+        # Clear filename highlighting
+        for txt in file_texts:
+            txt.set_backgroundcolor(None)
+        plt.draw()
 
     
-    def reconstruct_and_play(event):
-        if selected_range is None:
-            print("No range selected.")
-            return
-        start, end = selected_range
-        snippet = data_global[start:end+1].T
-
-        # Reconstruct time-domain using basic ISTFT (estimation)
-        fft_len = snippet.shape[0]
-        nperseg = min(snippet.shape[1], 1024)
-        nperseg = max(16, nperseg - (nperseg % 2))
-        _, audio = istft(snippet, fs=8000, nperseg=nperseg, input_onesided=True)
-        audio = np.nan_to_num(audio)
-        audio = audio / np.max(np.abs(audio))  # normalize
-
-        duration = len(audio) / 8000
-        # Add playback progress bar
-        ax_prog = fig.add_axes([0.1, 0.17, 0.7, 0.01])
-        prog_bar = ax_prog.barh([0], [0], height=1, color='green')
-        ax_prog.set_xlim(0, 1)
-        ax_prog.axis('off')
-
-        progress = [0]
-        def update_progress(frame):
-            nonlocal ax_prog
-            if not sd.get_stream().active:
-                if ax_prog in fig.axes:
-                    fig.delaxes(ax_prog)
-                return
-            progress[0] += 1
-            prog_bar[0].set_width(progress[0] / 100.0)
-            if progress[0] >= 100:
-                if ax_prog in fig.axes:
-                    fig.delaxes(ax_prog)
-            return prog_bar
-
-        sd.stop()
-        sd.play(audio, samplerate=8000)
-        ani = animation.FuncAnimation(fig, update_progress, frames=100, interval=duration*10, repeat=False)
-        active_animations.append(ani)
-        plt.draw()
-            
-
-    ax_play = fig.add_axes([0.1, 0.13, 0.03, 0.04])
-    btn_play = Button(ax_play, 'Play')
-    btn_play.on_clicked(reconstruct_and_play)
 
     ax_clear = fig.add_axes([0.75, 0.13, 0.1, 0.04])
     btn_clear = Button(ax_clear, 'Clear Highlight')
@@ -513,183 +482,6 @@ def setup_viewer(file_paths):
     ax_down = fig.add_axes([0.05, 0.5, 0.03, 0.04])
     btn_down = Button(ax_down, '-Y')
     btn_down.on_clicked(lambda e: adjust_fft_scale(-10))
-
-        # --- Add Comment Button ---
-    def on_add_comment(event):
-        if selected_range is None:
-            print("No region selected to comment on.")
-            return
-        import tkinter.simpledialog
-        comment = tkinter.simpledialog.askstring("Add Comment", "Enter your comment for the selected region:")
-        if comment:
-            start, end = selected_range
-            gain = spec_img.get_clim()
-            y_scale = (fft_ymin, fft_ymax)
-            freq_marker_values = [marker[3] for marker in freq_markers if marker[3] is not None]
-            comments.append({
-                "start": start,
-                "end": end,
-                "text": comment,
-                "gain": gain,
-                "y_scale": y_scale,
-                "freq_markers": freq_marker_values
-            })
-            print(f"Comment saved for range {start}–{end}: {comment}")
-            add_log_entry(f"Comment added: '{comment}' for range {start}–{end}")
-            update_comment_panel()
-
-    ax_comment = fig.add_axes([0.5, 0.13, 0.1, 0.04])
-    btn_comment = Button(ax_comment, '+ Comment')
-    btn_comment.on_clicked(on_add_comment)
-
-        # Comments list panel
-    ax_comments = fig.add_axes([0.82, 0.05, 0.14, 0.23], frameon=True, facecolor='whitesmoke')
-    ax_comments.set_title("Comments", fontsize=9, pad=8)
-    ax_comments.axis("off")
-
-    from matplotlib.widgets import Slider
-
-    # Update comment panel to use a scrollable box with compact buttons
-    def update_comment_panel():
-        global ax_comments, comment_buttons
-        ax_comments.clear()
-        ax_comments.set_title("Comments", fontsize=9, pad=8)
-        ax_comments.axis("off")
-
-        # Define scrollable area
-        scroll_height = 0.05  # Height of each button
-        max_visible = 5  # Maximum number of visible buttons
-        total_height = len(comments) * scroll_height
-        scroll_position = 0  # Initial scroll position
-
-        # Add a slider for scrolling
-        if total_height > max_visible * scroll_height:
-            ax_scroll = fig.add_axes([0.96, 0.05, 0.02, 0.23], facecolor='lightgray')
-            slider = Slider(ax_scroll, '', 0, total_height - max_visible * scroll_height, valinit=0, orientation='vertical')
-
-            def on_scroll(val):
-                nonlocal scroll_position
-                scroll_position = val
-                render_comments()
-
-            slider.on_changed(on_scroll)
-
-        def render_comments():
-            for btn in comment_buttons:
-                try: btn.ax.remove()
-                except: pass
-            comment_buttons.clear()
-
-            start_idx = int(scroll_position // scroll_height)
-            end_idx = min(start_idx + max_visible, len(comments))
-
-            for i, c in enumerate(comments[start_idx:end_idx]):
-                y = 0.9 - (i * 0.18)
-                ax = fig.add_axes([0.83, 0.23 - i * 0.06, 0.12, 0.03])
-                b = Button(ax, f"Comment {start_idx + i + 1}")
-
-                def jump(evt, s=c['start'], e=c['end'], gain=c['gain'], y_scale=c['y_scale'], freq_markers=c['freq_markers']):
-                    global fft_patch
-                    if fft_patch:
-                        fft_patch.remove()
-                    fft_patch = ax_spec.axvspan(s, e, color='orange', alpha=0.3)
-                    update_fft_range(s, e, freqs_global, data_global)
-
-                    # Restore gain
-                    spec_img.set_clim(*gain)
-
-                    # Restore y-axis scale
-                    global fft_ymin, fft_ymax
-                    fft_ymin, fft_ymax = y_scale
-                    ax_fft.set_ylim(fft_ymin, fft_ymax)
-
-                    # Restore frequency markers
-                    for i, freq in enumerate(freq_markers):
-                        if i < len(freq_markers):
-                            update_marker(i, freq)
-
-                    plt.draw()
-
-                b.on_clicked(jump)
-                comment_buttons.append(b)
-
-            plt.draw()
-
-        render_comments()
-
-    update_comment_panel()
-
-    # Add export options for spectrogram and FFT plots
-    def export_spectrogram(event):
-        try:
-            save_path = filedialog.asksaveasfilename(defaultextension=".png", filetypes=[("PNG Image", "*.png")])
-            if save_path:
-                fig.savefig(save_path)
-                print(f"Spectrogram saved to {save_path}")
-        except Exception as e:
-            logging.error("Error exporting spectrogram", exc_info=True)
-            print("Error exporting spectrogram. Check error_log.txt for details.")
-
-    def export_fft_data(event):
-        try:
-            save_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV File", "*.csv")])
-            if save_path:
-                np.savetxt(save_path, data_global, delimiter=",", header="Frequency,Amplitude", comments="")
-                print(f"FFT data saved to {save_path}")
-        except Exception as e:
-            logging.error("Error exporting FFT data", exc_info=True)
-            print("Error exporting FFT data. Check error_log.txt for details.")
-
-    # Add buttons for export options
-    ax_export_spec = fig.add_axes([0.1, 0.08, 0.1, 0.04])
-    btn_export_spec = Button(ax_export_spec, 'Export Spec')
-    btn_export_spec.on_clicked(export_spectrogram)
-
-    ax_export_fft = fig.add_axes([0.25, 0.08, 0.1, 0.04])
-    btn_export_fft = Button(ax_export_fft, 'Export FFT')
-    btn_export_fft.on_clicked(export_fft_data)
-
-    # Updated GUI layout and styling
-    fig.patch.set_facecolor('#f0f0f0')  # Set background color for the figure
-
-    # Update spectrogram axes styling
-    ax_spec.set_facecolor('#e6e6e6')
-    ax_spec.spines['top'].set_visible(False)
-    ax_spec.spines['right'].set_visible(False)
-    ax_spec.spines['left'].set_color('#666666')
-    ax_spec.spines['bottom'].set_color('#666666')
-    ax_spec.tick_params(axis='x', colors='#666666')
-    ax_spec.tick_params(axis='y', colors='#666666')
-    ax_spec.set_title('Spectrogram', fontsize=12, color='#333333')
-
-    # Update FFT axes styling
-    ax_fft.set_facecolor('black')
-    ax_fft.spines['top'].set_visible(False)
-    ax_fft.spines['right'].set_visible(False)
-    ax_fft.spines['left'].set_color('#666666')
-    ax_fft.spines['bottom'].set_color('#666666')
-    ax_fft.tick_params(axis='x', colors='#666666')
-    ax_fft.tick_params(axis='y', colors='#666666')
-    ax_fft.set_title('FFT Slice', fontsize=12, color='#ffffff')
-
-    # Update file list panel styling
-    ax_filelist.set_facecolor('#f9f9f9')
-    ax_filelist.set_title('Files', fontsize=10, pad=8, color='#333333')
-
-    # Update log panel styling
-    ax_log.set_facecolor('#f9f9f9')
-    ax_log.set_title('Log', fontsize=10, pad=4, color='#333333')
-
-    # Update button styling
-    for button in [btn_export_spec, btn_export_fft, btn_play, btn_clear, btn_comment, btn_up, btn_down]:
-        button.color = '#d9d9d9'
-        button.hovercolor = '#bfbfbf'
-
-    # Add a title to the entire figure
-    fig.suptitle('Hydrophone Data Viewer', fontsize=16, color='#333333', weight='bold')
-
-    # Adjust layout for better spacing
-    fig.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1, hspace=0.4, wspace=0.4)
 
     plt.show()
 
