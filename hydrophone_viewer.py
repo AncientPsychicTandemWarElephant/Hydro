@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import sounddevice as sd
 import matplotlib.animation as animation
 from scipy.signal import istft
-from matplotlib.widgets import Button, SpanSelector, RangeSlider
+from matplotlib.widgets import Button, SpanSelector, RangeSlider, TextBox
 import tkinter as tk
 from tkinter import filedialog
 from matplotlib.transforms import blended_transform_factory
@@ -213,11 +213,70 @@ def setup_viewer(file_paths):
     comments.clear()
     comment_buttons.clear()
 
-    fig = plt.figure(figsize=(18, 9))
-    ax_log = fig.add_axes([0.1, 0.03, 0.7, 0.07], frameon=True, facecolor='lightgray')
+    # Make the window wider for more space
+    fig = plt.figure(figsize=(22, 9))  # was (18, 9)
+
+    ax_log = fig.add_axes([0.12, 0.03, 0.7, 0.07], frameon=True, facecolor='lightgray')
     ax_log.set_title("Log", fontsize=9, pad=4, color='black')
     ax_log.axis("off")
 
+    # Gain slider and step buttons (aligned with spectrogram)
+    # Spectrogram axes: [0.1, 0.2, 0.7, 0.25]
+    gain_slider_left = 0.045   # just left of spectrogram
+    gain_slider_bottom = 0.2   # aligns with spectrogram bottom
+    gain_slider_width = 0.02
+    gain_slider_height = 0.25  # matches spectrogram height
+
+    ax_gain = fig.add_axes([gain_slider_left, gain_slider_bottom, gain_slider_width, gain_slider_height])
+    vmin = np.nanmin(data_global)
+    vmax = np.nanmax(data_global)
+    gain_slider = RangeSlider(ax_gain, 'Gain', vmin, vmax, valinit=(vmin, vmax), orientation='vertical')
+
+    gain_step = 1.0
+
+    # Place buttons in a vertical column to the left of the slider
+    btn_width = 0.035
+    btn_height = 0.04
+    btn_left = gain_slider_left - btn_width - 0.005  # further left of slider
+    # Evenly space buttons along the slider height
+    btn_y = [
+        gain_slider_bottom + gain_slider_height * 0.75,  # +Max
+        gain_slider_bottom + gain_slider_height * 0.60,  # -Max
+        gain_slider_bottom + gain_slider_height * 0.35,  # +Min
+        gain_slider_bottom + gain_slider_height * 0.20,  # -Min
+    ]
+
+    ax_max_up = fig.add_axes([btn_left, btn_y[0], btn_width, btn_height])
+    btn_max_up = Button(ax_max_up, '+Max')
+    ax_max_down = fig.add_axes([btn_left, btn_y[1], btn_width, btn_height])
+    btn_max_down = Button(ax_max_down, '-Max')
+    ax_min_up = fig.add_axes([btn_left, btn_y[2], btn_width, btn_height])
+    btn_min_up = Button(ax_min_up, '+Min')
+    ax_min_down = fig.add_axes([btn_left, btn_y[3], btn_width, btn_height])
+    btn_min_down = Button(ax_min_down, '-Min')
+
+    def update_gain(val):
+        lo, hi = val
+        spec_img.set_clim(lo, hi)
+        plt.draw()
+
+    def step_min(delta):
+        lo, hi = gain_slider.val
+        new_lo = np.clip(lo + delta, vmin, hi - 0.01)
+        gain_slider.set_val((new_lo, hi))
+
+    def step_max(delta):
+        lo, hi = gain_slider.val
+        new_hi = np.clip(hi + delta, lo + 0.01, vmax)
+        gain_slider.set_val((lo, new_hi))
+
+    btn_min_up.on_clicked(lambda event: step_min(gain_step))
+    btn_min_down.on_clicked(lambda event: step_min(-gain_step))
+    btn_max_up.on_clicked(lambda event: step_max(gain_step))
+    btn_max_down.on_clicked(lambda event: step_max(-gain_step))
+    gain_slider.on_changed(update_gain)
+
+    # Other UI elements (log, file list, etc.) remain unchanged
     def add_log_entry(text):
         timestamp = datetime.now().strftime('%H:%M:%S')
         log_entries.append(f"[{timestamp}] {text}")
@@ -261,7 +320,6 @@ def setup_viewer(file_paths):
     ax_fft = fig.add_axes([0.1, 0.55, 0.7, 0.35])
     ax_fft.grid(True, axis='y', linestyle='--', color='gray', alpha=0.3)
     ax_spec = fig.add_axes([0.1, 0.2, 0.7, 0.25])
-    ax_gain = fig.add_axes([0.02, 0.2, 0.02, 0.25])
     ax_filelist = fig.add_axes([0.82, 0.3, 0.14, 0.55], frameon=True, facecolor='lightgray')
     ax_filelist.clear()
     ax_filelist.set_title("Files", fontsize=9, pad=8)
@@ -283,11 +341,7 @@ def setup_viewer(file_paths):
         cmap='viridis'
     )
 
-    vmin = np.nanmin(data_global)
-    vmax = np.nanmax(data_global)
-    gain_slider = RangeSlider(ax_gain, 'Gain', vmin, vmax,
-                              valinit=(vmin, vmax), orientation='vertical')
-    gain_slider.on_changed(lambda v: update_gain(v))
+ 
 
     def ctrl_select(xmin, xmax):
         global fft_patch, selected_range
